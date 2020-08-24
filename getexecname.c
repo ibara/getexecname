@@ -28,7 +28,7 @@
 /*
  * Get full path name of running executable.
  * On a best-guess basis.
- * Return string of full pathname, or NULL if something goes wrong.
+ * Return string of full pathname, or NULL if we can't.
  */
 const char *
 getexecname(void)
@@ -174,21 +174,28 @@ check:
 	}
 
 	/*
-	 * If we still can't find anything... relative path it is.
+	 * If we still can't find anything, we could use realpath(3)
+	 * to resolve a relative path.
 	 */
 	i = 0;
 	while (buf[i] != NULL) {
 		if (!strncmp(buf[i], "_=", 2)) {
 			++buf[i];
 			++buf[i];
-			if (!strcmp(basename(buf[i]), getprogname()))
-				return buf[i];
+
+			if (strcmp(basename(buf[i]), getprogname()) != 0)
+				break;
+
+			(void) realpath(buf[i], bin);
+
+			if (access(bin, X_OK) == 0)
+				return bin;
 		}
 		++i;
 	}
 
 	/*
-	 * And if we still can't find anything... getprogname.
+	 * Out of options.
 	 */
-	return getprogname();
+	return NULL;
 }
