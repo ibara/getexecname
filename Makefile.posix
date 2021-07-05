@@ -1,0 +1,25 @@
+# getexecname(3) Makefile
+#
+# This Makefile was written by Brian Callahan <bcallah@openbsd.org>
+#   and released into the Public Domain.
+
+CC ?=		cc
+CFLAGS ?=	-g -O2
+
+LIB =	libgetexecname.a
+OBJS =	getexecname.o
+
+MAJOR =	0
+MINOR =	0
+
+all: static example
+
+static: ${OBJS}
+	${AR} cru ${LIB} ${OBJS}
+	ranlib ${LIB}
+
+example: static example.o
+	${CC} ${LDFLAGS} -o $@ example.o -L. -lgetexecname
+
+clean:
+	rm -f ${LIB} example ${OBJS} example.o

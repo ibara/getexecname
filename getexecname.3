@@ -1,5 +1,5 @@
 .\"
-.\" Copyright (c) 2020 Brian Callahan <bcallah@openbsd.org>
+.\" Copyright (c) 2020-2021 Brian Callahan <bcallah@openbsd.org>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -13,7 +13,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd August 14, 2020
+.Dd July 4, 2021
 .Dt GETEXECNAME 3
 .Os
 .Sh NAME
@@ -26,7 +26,7 @@
 .Sh DESCRIPTION
 The
 .Nm
-function returns the pathname of the running executable, or NULL if a full
+function returns the pathname of the running executable, or NULL if the full
 pathname cannot be determined.
 .Sh SEE ALSO
 .Xr getprogname 3
@@ -38,13 +38,6 @@ was written by
 In the event that there are two or more binaries with identical names on
 the system, it is possible that
 .Nm
-will return an incorrect pathname if using the fallback
+will return an incorrect pathname when using
 .Sy PATH
 environment variable-based resolution.
-Starting the process from a shell with the
-.Sy _
-environment variable, such as
-.Xr ksh 1
-or
-.Xr bash 1 ,
-will help mitigate this issue.

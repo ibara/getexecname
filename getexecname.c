@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Brian Callahan <bcallah@openbsd.org>
+ * Copyright (c) 2020-2021 Brian Callahan <bcallah@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -17,8 +17,9 @@
 #include <sys/types.h>
 #include <sys/sysctl.h>
 
-#include <libgen.h>
+#include <errno.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -26,176 +27,152 @@
 #include "getexecname.h"
 
 /*
+ * Couldn't get env via sysctl?
+ * Try getenv(3).
+ */
+static char *
+environment(void)
+{
+	char *env, *p;
+	size_t len;
+
+	/* "PATH=" + '\0' = 6  */
+	p = getenv("PATH");
+	len = strlen(p) + 6;
+
+	if ((env = malloc(len)) == NULL)
+		return NULL;
+
+	strcpy(env, "PATH=");
+	strcat(env, p);
+
+	return env;
+}
+
+/*
  * Get full path name of running executable.
- * On a best-guess basis.
- * Return string of full pathname, or NULL if we can't.
+ * Return string of full pathname, or NULL if error.
  */
 const char *
 getexecname(void)
 {
-	static char bin[PATH_MAX];
-	char *buf[1024]; /* Probably overkill */
-	char *s;
-	char t;
-	int end = 0, i, mib[4];
-	size_t len;
+	static char execname[PATH_MAX];
+	char **argv, **env;
+	char *s, t;
+	int end = 0, mib[4];
+	size_t i, len;
 
+	(void) memset(execname, 0, sizeof(execname));
+
+	/*
+	 * Option 1:
+	 * Get argv[0] and run it against realpath(3).
+	 */
+	mib[0] = CTL_KERN;
+	mib[1] = KERN_PROC_ARGS;
+	mib[2] = getpid();
+	mib[3] = KERN_PROC_ARGV;
+
+	if (sysctl(mib, 4, NULL, &len, NULL, 0) == -1)
+		return NULL;
+
+	if ((argv = malloc(sizeof(char *) * (len - 1))) == NULL)
+		return NULL;
+
+	if (sysctl(mib, 4, argv, &len, NULL, 0) == -1)
+		return NULL;
+
+	/* Can be resolved with realpath(3)?  Do that and done.  */
+	if (*argv[0] == '/' || *argv[0] == '.') {
+		errno = 0;
+
+		snprintf(execname, sizeof(execname), "%s", realpath(argv[0], NULL));
+
+		free(argv);
+
+		if (errno != 0)
+			return NULL;
+
+		return execname;
+	}
+
+	/*
+	 * Option 2:
+	 * Get the program's PATH and try each in order.
+	 */
 	mib[0] = CTL_KERN;
 	mib[1] = KERN_PROC_ARGS;
 	mib[2] = getpid();
 	mib[3] = KERN_PROC_ENV;
 
-	len = sizeof(buf);
+	if (sysctl(mib, 4, NULL, &len, NULL, 0) == -1) {
+		if ((env = malloc(sizeof(char *))) == NULL) {
+			free(argv);
 
-	if (sysctl(mib, 4, buf, &len, NULL, 0) == -1)
-		return NULL;
-
-	/*
-	 * Some shells (ksh, bash) have a _ variable.
-	 * But only use it if we have a full path.
-	 */
-	i = 0;
-	while (buf[i] != NULL) {
-		if (!strncmp(buf[i], "_=/", 3)) {
-			++buf[i];
-			++buf[i];
-			if (!strcmp(basename(buf[i]), getprogname()))
-				return buf[i];
+			return NULL;
 		}
-		++i;
+
+		if ((env[0] = environment()) == NULL)
+			goto error;
+	} else {
+		if ((env = malloc(sizeof(char *) * (len - 1))) == NULL) {
+			free(argv);
+
+			return NULL;
+		}
+
+		if (sysctl(mib, 4, env, &len, NULL, 0) == -1)
+			goto error;
 	}
 
-	/*
-	 * Otherwise, grab PATH and return the first hit.
-	 * This could be wrong if you have two executables
-	 * of the same name in different PATH dirs.
-	 */
-	i = 0;
-	while (buf[i] != NULL) {
-		if (!strncmp(buf[i], "PATH=", 5)) {
-			++buf[i];
-			++buf[i];
-			++buf[i];
-			++buf[i];
-			++buf[i];
+	/* PATH resolution.  */
+	for (i = 0; env[i] != NULL; i++) {
+		if (!strncmp(env[i], "PATH=", 5)) {
+			++env[i];
+			++env[i];
+			++env[i];
+			++env[i];
+			++env[i];
+
+			if (*env[i] == '\0')
+				goto error;
 
 check:
-			s = buf[i];
-			while ((t = *buf[i]) != ':') {
+			s = env[i];
+			while ((t = *env[i]) != ':') {
 				if (t == '\0') {
 					end = 1;
 					break;
 				}
-				++buf[i];
+				++env[i];
 			}
-			*buf[i] = '\0';
+			*env[i] = '\0';
 
-			strlcpy(bin, s, sizeof(bin));
-			strlcat(bin, "/", sizeof(bin));
-			strlcat(bin, getprogname(), sizeof(bin));
+			strlcpy(execname, s, sizeof(execname));
+			strlcat(execname, "/", sizeof(execname));
+			strlcat(execname, argv[0], sizeof(execname));
 
 			/* Success, probably.  */
-			if (access(bin, X_OK) == 0)
-				return bin;
+			if (access(execname, X_OK) == 0) {
+				free(argv);
+				free(env);
 
-			if (end || *++buf[i] == '\0')
+				return execname;
+			}
+
+			if (end || *++env[i] == '\0')
 				break;
 
 			goto check;
 		}
-		++i;
-	}
-
-	/*
-	 * Or maybe it's in PWD?
-	 */
-	i = 0;
-	while (buf[i] != NULL) {
-		if (!strncmp(buf[i], "PWD=", 4)) {
-			++buf[i];
-			++buf[i];
-			++buf[i];
-			++buf[i];
-
-			s = buf[i];
-			while ((t = *buf[i]) != ':') {
-				if (t == '\0') {
-					end = 1;
-					break;
-				}
-				++buf[i];
-			}
-			*buf[i] = '\0';
-
-			strlcpy(bin, s, sizeof(bin));
-			strlcat(bin, "/", sizeof(bin));
-			strlcat(bin, getprogname(), sizeof(bin));
-
-			/* Success, probably.  */
-			if (access(bin, X_OK) == 0)
-				return bin;
-		}
-		++i;
-	}
-
-	/*
-	 * Or maybe it's in OLDPWD?
-	 */
-	i = 0;
-	while (buf[i] != NULL) {
-		if (!strncmp(buf[i], "OLDPWD=", 7)) {
-			++buf[i];
-			++buf[i];
-			++buf[i];
-			++buf[i];
-			++buf[i];
-			++buf[i];
-			++buf[i];
-
-			s = buf[i];
-			while ((t = *buf[i]) != ':') {
-				if (t == '\0') {
-					end = 1;
-					break;
-				}
-				++buf[i];
-			}
-			*buf[i] = '\0';
-
-			strlcpy(bin, s, sizeof(bin));
-			strlcat(bin, "/", sizeof(bin));
-			strlcat(bin, getprogname(), sizeof(bin));
-
-			/* Success, probably.  */
-			if (access(bin, X_OK) == 0)
-				return bin;
-		}
-		++i;
-	}
-
-	/*
-	 * If we still can't find anything, we could use realpath(3)
-	 * to resolve a relative path.
-	 */
-	i = 0;
-	while (buf[i] != NULL) {
-		if (!strncmp(buf[i], "_=", 2)) {
-			++buf[i];
-			++buf[i];
-
-			if (strcmp(basename(buf[i]), getprogname()) != 0)
-				break;
-
-			(void) realpath(buf[i], bin);
-
-			if (access(bin, X_OK) == 0)
-				return bin;
-		}
-		++i;
 	}
 
 	/*
 	 * Out of options.
 	 */
+error:
+	free(argv);
+	free(env);
+
 	return NULL;
 }
