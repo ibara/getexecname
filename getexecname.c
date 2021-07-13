@@ -128,11 +128,7 @@ getexecname(void)
 	/* PATH resolution.  */
 	for (i = 0; env[i] != NULL; i++) {
 		if (!strncmp(env[i], "PATH=", 5)) {
-			++env[i];
-			++env[i];
-			++env[i];
-			++env[i];
-			++env[i];
+			env[i] += 5;
 
 			if (*env[i] == '\0')
 				goto error;
