@@ -144,9 +144,7 @@ check:
 			}
 			*env[i] = '\0';
 
-			strlcpy(execname, s, sizeof(execname));
-			strlcat(execname, "/", sizeof(execname));
-			strlcat(execname, argv[0], sizeof(execname));
+			snprintf(execname, sizeof(execname), "%s/%s", s, argv[0]);
 
 			/* Success, probably.  */
 			if (access(execname, X_OK) == 0) {
