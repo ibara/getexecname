@@ -26,6 +26,8 @@
 
 #include "getexecname.h"
 
+extern char **environ;
+
 /*
  * Couldn't get env via sysctl?
  * Try getenv(3).
@@ -33,20 +35,10 @@
 static char *
 environment(void)
 {
-	char *env, *p;
-	size_t len;
-
-	/* "PATH=" + '\0' = 6  */
-	p = getenv("PATH");
-	len = strlen(p) + 6;
-
-	if ((env = malloc(len)) == NULL)
-		return NULL;
-
-	strcpy(env, "PATH=");
-	strcat(env, p);
-
-	return env;
+	for (char **cur = environ; *cur; ++cur)
+		if (!strncmp(*cur, "PATH=", 5))
+			return *cur;
+	return NULL;
 }
 
 /*
