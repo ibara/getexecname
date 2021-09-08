@@ -30,7 +30,7 @@ extern char **environ;
 
 /*
  * Couldn't get env via sysctl?
- * Try getenv(3).
+ * Try environ variable.
  */
 static char *
 environment(void)
