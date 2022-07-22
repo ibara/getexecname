@@ -33,10 +33,10 @@ extern char **environ;
  * Try environ variable.
  */
 static char *
-environment(void)
+environment(int condition)
 {
 	for (char **cur = environ; *cur; ++cur)
-		if (!strncmp(*cur, "PATH=", 5))
+		if (!strncmp(*cur, (condition) ? "PATH=" : "PWD=", 4 + condition))
 			return *cur;
 	return NULL;
 }
@@ -48,12 +48,14 @@ environment(void)
 const char *
 getexecname(void)
 {
+	static char res[PATH_MAX];
 	static char execname[PATH_MAX];
 	char **argv, **env;
-	char *s, t;
-	int end = 0, mib[4];
+	char *s = NULL, t;
+	int end = 0, mib[4], condition = 0;
 	size_t i, len;
 
+	(void) memset(res, 0, sizeof(res));
 	(void) memset(execname, 0, sizeof(execname));
 
 	/*
@@ -75,7 +77,7 @@ getexecname(void)
 		return NULL;
 
 	/* Can be resolved with realpath(3)?  Do that and done.  */
-	if (*argv[0] == '/' || *argv[0] == '.') {
+	if (*argv[0] == '/') {
 		errno = 0;
 
 		snprintf(execname, sizeof(execname), "%s", realpath(argv[0], NULL));
@@ -104,7 +106,7 @@ getexecname(void)
 			return NULL;
 		}
 
-		if ((env[0] = environment()) == NULL)
+		if ((env[0] = environment((condition) ? 0 : 1)) == NULL)
 			goto error;
 	} else {
 		if ((env = malloc(sizeof(char *) * (len - 1))) == NULL) {
@@ -119,13 +121,16 @@ getexecname(void)
 
 	/* PATH resolution.  */
 	for (i = 0; env[i] != NULL; i++) {
-		if (!strncmp(env[i], "PATH=", 5)) {
-			env[i] += 5;
+		if (!strncmp(env[i], (condition) ? "PWD=" : "PATH=", (condition) ? 4 : 5)) {
+			env[i] += (condition) ? 4 : 5;
 
 			if (*env[i] == '\0')
 				goto error;
 
 check:
+			condition = (*argv[0] == '.');
+			if (condition) goto pwd;
+
 			s = env[i];
 			while ((t = *env[i]) != ':') {
 				if (t == '\0') {
@@ -136,7 +141,15 @@ check:
 			}
 			*env[i] = '\0';
 
+			pwd:
+			if (s == NULL) s = env[i];
 			snprintf(execname, sizeof(execname), "%s/%s", s, argv[0]);
+			if (realpath(execname, res) != NULL) {
+				free(argv);
+				free(env);
+				
+				return res;
+			}
 
 			/* Success, probably.  */
 			if (access(execname, X_OK) == 0) {
