@@ -48,14 +48,12 @@ environment(int condition)
 const char *
 getexecname(void)
 {
-	static char res[PATH_MAX];
 	static char execname[PATH_MAX];
 	char **argv, **env;
 	char *s = NULL, t;
 	int end = 0, mib[4], condition = 0;
 	size_t i, len;
 
-	(void) memset(res, 0, sizeof(res));
 	(void) memset(execname, 0, sizeof(execname));
 
 	/*
@@ -78,9 +76,12 @@ getexecname(void)
 
 	/* Can be resolved with realpath(3)?  Do that and done.  */
 	if (*argv[0] == '/') {
+cwd:
 		errno = 0;
 
-		snprintf(execname, sizeof(execname), "%s", realpath(argv[0], NULL));
+		if (realpath(argv[0], execname) != NULL) {
+			snprintf(execname, sizeof(execname), "%s", execname);
+		}
 
 		free(argv);
 
@@ -98,6 +99,8 @@ getexecname(void)
 	mib[1] = KERN_PROC_ARGS;
 	mib[2] = getpid();
 	mib[3] = KERN_PROC_ENV;
+
+        condition = (*argv[0] == '.');
 
 	if (sysctl(mib, 4, NULL, &len, NULL, 0) == -1) {
 		if ((env = malloc(sizeof(char *))) == NULL) {
@@ -128,7 +131,6 @@ getexecname(void)
 				goto error;
 
 check:
-			condition = (*argv[0] == '.');
 			if (condition) goto pwd;
 
 			s = env[i];
@@ -141,22 +143,17 @@ check:
 			}
 			*env[i] = '\0';
 
-			pwd:
+pwd:
 			if (s == NULL) s = env[i];
 			snprintf(execname, sizeof(execname), "%s/%s", s, argv[0]);
-			if (realpath(execname, res) != NULL) {
-				free(argv);
-				free(env);
-				
-				return res;
-			}
+			if (realpath(execname, execname) != NULL) {
+				snprintf(execname, sizeof(execname), "%s", execname);
+				if (access(execname, X_OK) == 0) {
+					free(argv);
+					free(env);
 
-			/* Success, probably.  */
-			if (access(execname, X_OK) == 0) {
-				free(argv);
-				free(env);
-
-				return execname;
+					return execname;
+				}
 			}
 
 			if (end || *++env[i] == '\0')
@@ -170,8 +167,9 @@ check:
 	 * Out of options.
 	 */
 error:
-	free(argv);
 	free(env);
+	if (condition) goto cwd;
+	free(argv);
 
 	return NULL;
 }
