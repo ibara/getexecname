@@ -131,7 +131,8 @@ cwd:
 				goto error;
 
 check:
-			if (condition) goto pwd;
+			if (condition) 
+				goto pwd;
 
 			s = env[i];
 			while ((t = *env[i]) != ':') {
@@ -144,7 +145,9 @@ check:
 			*env[i] = '\0';
 
 pwd:
-			if (s == NULL) s = env[i];
+			if (s == NULL) 
+				s = env[i];
+
 			snprintf(execname, sizeof(execname), "%s/%s", s, argv[0]);
 			if (realpath(execname, execname) != NULL) {
 				snprintf(execname, sizeof(execname), "%s", execname);
@@ -168,7 +171,10 @@ pwd:
 	 */
 error:
 	free(env);
-	if (condition) goto cwd;
+
+	if (condition) 
+		goto cwd;
+
 	free(argv);
 
 	return NULL;
